@@ -19,14 +19,20 @@ import android.webkit.WebView
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.PopupWindow
+import android.widget.ScrollView
 import android.widget.TextView
 import com.shizuku.deskpet.R
 import com.shizuku.deskpet.data.AiClient
+import com.shizuku.deskpet.data.PetCatalog
 import com.shizuku.deskpet.data.PreferencesManager
+import com.shizuku.deskpet.data.TtsClient
 import com.shizuku.deskpet.model.ChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.random.Random
@@ -40,6 +46,17 @@ class FloatingView(
     private var webView: WebView? = null
     private var bubbleWindow: PopupWindow? = null
     private var currentBubbleTextView: TextView? = null
+    private var reasoningTextView: TextView? = null
+    private var reasoningToggle: TextView? = null
+    private var reasoningScroll: ScrollView? = null
+    private var ttsClient: TtsClient? = null
+    private var requestJob: Job? = null
+    private var ttsPlaying = false
+    private val bubbleHandler = Handler(Looper.getMainLooper())
+    private val dismissBubbleRunnable = Runnable {
+        hideAiBubble()
+        if (currentState == PetState.TALKING) updateState(PetState.IDLE)
+    }
     private var statusIndicator: ImageView? = null
 
     private lateinit var prefsManager: PreferencesManager
@@ -162,7 +179,7 @@ class FloatingView(
         showLoading()
         updateState(PetState.SMILE)
 
-        coroutineScope.launch {
+        requestJob = coroutineScope.launch {
             val client = aiClient
             if (client == null || prefsManager.apiKey.isBlank()) {
                 hideLoading()
@@ -171,9 +188,10 @@ class FloatingView(
             }
 
             updateState(PetState.TALKING)
-            initAiBubble()
+            if (prefsManager.showAiBubble) initAiBubble()
             
             val stringBuilder = StringBuilder()
+            val reasoningBuilder = StringBuilder()
             var isFirstChunk = true
 
             try {
@@ -183,14 +201,23 @@ class FloatingView(
                             hideLoading()
                             isFirstChunk = false
                         }
-                        stringBuilder.append(chunk)
-                        if (prefsManager.showAiBubble) {
-                            updateAiBubbleText(stringBuilder.toString())
+                        when (chunk) {
+                            is AiClient.StreamEvent.Answer -> {
+                                stringBuilder.append(chunk.text)
+                                if (prefsManager.showAiBubble) updateAiBubbleText(stringBuilder.toString())
+                            }
+                            is AiClient.StreamEvent.Reasoning -> {
+                                reasoningBuilder.append(chunk.text)
+                                if (prefsManager.showAiBubble) updateReasoning(reasoningBuilder.toString())
+                            }
                         }
                     }
-
+                hideLoading()
+                speakAnswer(stringBuilder.toString())
                 finishAiBubble(prefsManager.aiBubbleDuration)
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 hideLoading()
                 hideAiBubble()
@@ -218,6 +245,7 @@ class FloatingView(
 
         prefsManager = PreferencesManager(context)
         aiClient = AiClient(prefsManager)
+        ttsClient = TtsClient(context, prefsManager)
 
         rootView = LayoutInflater.from(context).inflate(R.layout.floating_window, null)
         
@@ -281,17 +309,17 @@ class FloatingView(
     }
 
     private fun playVideo(state: PetState) {
-        val videoFileName = when (state) {
-            PetState.IDLE -> "standby.webm"
-            PetState.TALKING -> "speak.webm"
-            PetState.SMILE -> "smile.webm"
-            PetState.DRAGGING -> "touch.webm"
-        }
+        val videoFileName = PetCatalog.assetPath(prefsManager.selectedPetId, when (state) {
+            PetState.IDLE -> "standby"
+            PetState.TALKING -> "speak"
+            PetState.SMILE -> "smile"
+            PetState.DRAGGING -> "touch"
+        })
 
-        val isMuted = !prefsManager.playSound
+        val isMuted = !prefsManager.playSound || ttsPlaying
 
         if (!isWebViewInitialized) {
-            val initialVideo = "standby.webm"
+            val initialVideo = PetCatalog.assetPath(prefsManager.selectedPetId, "standby")
             
             val html = """
                 <!DOCTYPE html>
@@ -346,7 +374,10 @@ class FloatingView(
                         let lastSrc = '$initialVideo';
                         
                         function changeVideo(newSrc, muted) {
-                            if (newSrc === lastSrc) return;
+                            if (newSrc === lastSrc) {
+                                currentV.muted = muted;
+                                return;
+                            }
                             lastSrc = newSrc;
                             
                             nextV.muted = muted;
@@ -394,6 +425,9 @@ class FloatingView(
     }
 
     fun hide() {
+        requestJob?.cancel()
+        coroutineScope.cancel()
+        ttsClient?.stop()
         videoChangeHandler.removeCallbacks(videoChangeRunnable)
         videoChangeHandler.removeCallbacks(revertSmileRunnable)
         smileCheckHandler.removeCallbacks(smileCheckRunnable)
@@ -501,18 +535,23 @@ class FloatingView(
         showBubbleAtPosition()
         updateBubblePosition()
 
-        bubbleTextView.postDelayed({
-            hideAiBubble()
-            if (currentState == PetState.TALKING) {
-                updateState(PetState.IDLE)
-            }
-        }, durationMs.toLong())
+        bubbleHandler.removeCallbacks(dismissBubbleRunnable)
+        bubbleHandler.postDelayed(dismissBubbleRunnable, durationMs.toLong())
     }
 
     fun initAiBubble() {
         hideAiBubble()
         val bubbleView = LayoutInflater.from(context).inflate(R.layout.bubble_popup, null)
         currentBubbleTextView = bubbleView.findViewById(R.id.bubble_text)
+        reasoningTextView = bubbleView.findViewById(R.id.reasoning_text)
+        reasoningToggle = bubbleView.findViewById(R.id.reasoning_toggle)
+        reasoningScroll = bubbleView.findViewById(R.id.reasoning_scroll)
+        reasoningToggle?.setOnClickListener {
+            val expanded = reasoningScroll?.visibility != View.VISIBLE
+            reasoningScroll?.visibility = if (expanded) View.VISIBLE else View.GONE
+            reasoningToggle?.text = if (expanded) "思考过程 ▾" else "思考过程 ▸"
+            updateBubblePosition()
+        }
         currentBubbleTextView?.text = "思考中..."
 
         bubbleWindow = PopupWindow(
@@ -533,13 +572,35 @@ class FloatingView(
         updateBubblePosition()
     }
 
+    private fun updateReasoning(text: String) {
+        reasoningTextView?.text = text
+        reasoningToggle?.visibility = View.VISIBLE
+        if (!prefsManager.foldThinking) {
+            reasoningScroll?.visibility = View.VISIBLE
+            reasoningToggle?.text = "思考过程 ▾"
+        }
+        updateBubblePosition()
+    }
+
+    private suspend fun speakAnswer(text: String) {
+        if (!prefsManager.ttsEnabled || text.isBlank()) return
+        try {
+            ttsPlaying = true
+            playVideo(PetState.TALKING)
+            ttsClient?.synthesizeAndPlay(text)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (prefsManager.showAiBubble) updateAiBubbleText("$text\n\n语音播放失败：${e.message}")
+        } finally {
+            ttsPlaying = false
+            playVideo(PetState.TALKING)
+        }
+    }
+
     fun finishAiBubble(durationMs: Int = 5000) {
-        currentBubbleTextView?.postDelayed({
-            hideAiBubble()
-            if (currentState == PetState.TALKING) {
-                updateState(PetState.IDLE)
-            }
-        }, durationMs.toLong())
+        bubbleHandler.removeCallbacks(dismissBubbleRunnable)
+        bubbleHandler.postDelayed(dismissBubbleRunnable, durationMs.toLong())
     }
 
     // 调整气泡窗口y轴偏移量
@@ -573,8 +634,13 @@ class FloatingView(
     }
 
     fun hideAiBubble() {
+        bubbleHandler.removeCallbacks(dismissBubbleRunnable)
         bubbleWindow?.dismiss()
         bubbleWindow = null
+        currentBubbleTextView = null
+        reasoningTextView = null
+        reasoningToggle = null
+        reasoningScroll = null
     }
 
     fun showLoading() {
@@ -630,10 +696,12 @@ class FloatingView(
     }
 
     private fun sendMessage(message: String) {
+        requestJob?.cancel()
+        ttsClient?.stop()
         showLoading()
         updateState(PetState.SMILE)
 
-        coroutineScope.launch {
+        requestJob = coroutineScope.launch {
             val client = aiClient
             if (client == null) {
                 hideLoading()
@@ -654,9 +722,10 @@ class FloatingView(
             }
 
             updateState(PetState.TALKING)
-            initAiBubble()
+            if (prefsManager.showAiBubble) initAiBubble()
             
             val stringBuilder = StringBuilder()
+            val reasoningBuilder = StringBuilder()
             var isFirstChunk = true
 
             try {
@@ -667,15 +736,23 @@ class FloatingView(
                             isFirstChunk = false
                         }
 
-                        stringBuilder.append(chunk)
-
-                        if (prefsManager.showAiBubble) {
-                            updateAiBubbleText(stringBuilder.toString())
+                        when (chunk) {
+                            is AiClient.StreamEvent.Answer -> {
+                                stringBuilder.append(chunk.text)
+                                if (prefsManager.showAiBubble) updateAiBubbleText(stringBuilder.toString())
+                            }
+                            is AiClient.StreamEvent.Reasoning -> {
+                                reasoningBuilder.append(chunk.text)
+                                if (prefsManager.showAiBubble) updateReasoning(reasoningBuilder.toString())
+                            }
                         }
                     }
-
+                hideLoading()
+                speakAnswer(stringBuilder.toString())
                 finishAiBubble(prefsManager.aiBubbleDuration)
 
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 hideLoading()
                 updateAiBubbleText("错误: ${e.message}")

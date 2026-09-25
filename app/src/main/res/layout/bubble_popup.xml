@@ -1,11 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
-<TextView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/bubble_text"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="wrap_content"
     android:layout_height="wrap_content"
     android:background="@drawable/bg_bubble"
-    android:maxWidth="200dp"
-    android:padding="12dp"
-    android:textColor="#333333"
-    android:textSize="14sp"
-    android:autoLink="web" />
+    android:orientation="vertical"
+    android:padding="12dp">
+    <TextView
+        android:id="@+id/reasoning_toggle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="思考过程 ▸"
+        android:textColor="#666666"
+        android:textSize="12sp"
+        android:visibility="gone" />
+    <ScrollView
+        android:id="@+id/reasoning_scroll"
+        android:layout_width="220dp"
+        android:layout_height="wrap_content"
+        android:maxHeight="120dp"
+        android:visibility="gone">
+        <TextView
+            android:id="@+id/reasoning_text"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="6dp"
+            android:textColor="#666666"
+            android:textSize="12sp" />
+    </ScrollView>
+    <ScrollView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:maxHeight="220dp">
+        <TextView
+            android:id="@+id/bubble_text"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxWidth="220dp"
+            android:textColor="#333333"
+            android:textSize="14sp"
+            android:autoLink="web" />
+    </ScrollView>
+</LinearLayout>

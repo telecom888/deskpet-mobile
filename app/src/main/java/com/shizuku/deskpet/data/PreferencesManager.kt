@@ -5,6 +5,50 @@ import android.content.SharedPreferences
 
 class PreferencesManager(context: Context) {
 
+    var selectedPetId: String
+        get() = prefs.getString("selected_pet_id", "perlica") ?: "perlica"
+        set(value) = prefs.edit().putString("selected_pet_id", value).apply()
+
+    var ttsEnabled: Boolean
+        get() = prefs.getBoolean("tts_enabled", false)
+        set(value) = prefs.edit().putBoolean("tts_enabled", value).apply()
+
+    var ttsProvider: String
+        get() = prefs.getString("tts_provider", "mimo") ?: "mimo"
+        set(value) = prefs.edit().putString("tts_provider", value).apply()
+
+    var ttsBaseUrl: String
+        get() = prefs.getString("tts_base_url", "https://api.xiaomimimo.com/v1") ?: "https://api.xiaomimimo.com/v1"
+        set(value) = prefs.edit().putString("tts_base_url", value).apply()
+
+    var ttsApiKey: String
+        get() = prefs.getString("tts_api_key", "") ?: ""
+        set(value) = prefs.edit().putString("tts_api_key", value).apply()
+
+    var ttsModel: String
+        get() = prefs.getString("tts_model", "mimo-v2.5-tts-voiceclone") ?: "mimo-v2.5-tts-voiceclone"
+        set(value) = prefs.edit().putString("tts_model", value).apply()
+
+    var ttsReferencePath: String
+        get() = prefs.getString("tts_reference_path", "") ?: ""
+        set(value) = prefs.edit().putString("tts_reference_path", value).apply()
+
+    var ttsVoice: String
+        get() = prefs.getString("tts_voice", "") ?: ""
+        set(value) = prefs.edit().putString("tts_voice", value).apply()
+
+    var thinkingEnabled: Boolean
+        get() = prefs.getBoolean("thinking_enabled", false)
+        set(value) = prefs.edit().putBoolean("thinking_enabled", value).apply()
+
+    var thinkingProtocol: String
+        get() = prefs.getString("thinking_protocol", "reasoning_effort") ?: "reasoning_effort"
+        set(value) = prefs.edit().putString("thinking_protocol", value).apply()
+
+    var foldThinking: Boolean
+        get() = prefs.getBoolean("fold_thinking", true)
+        set(value) = prefs.edit().putBoolean("fold_thinking", value).apply()
+
     private val prefs: SharedPreferences = context.getSharedPreferences(
         PREFS_NAME, Context.MODE_PRIVATE
     )

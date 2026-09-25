@@ -1,6 +1,9 @@
 package com.shizuku.deskpet.ui.screens
 
 import androidx.compose.foundation.clickable
+import androidx.compose.animation.AnimatedVisibility
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -20,7 +23,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.shizuku.deskpet.data.PreferencesManager
+import com.shizuku.deskpet.data.PetCatalog
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,9 +53,41 @@ fun SettingsScreen(
     var proactiveChatLevel by remember { mutableStateOf(prefsManager.proactiveChatLevel) }
     var proactiveChatMinInterval by remember { mutableStateOf(prefsManager.proactiveChatMinInterval) }
     var proactiveChatMaxInterval by remember { mutableStateOf(prefsManager.proactiveChatMaxInterval) }
+    var selectedPetId by remember { mutableStateOf(prefsManager.selectedPetId) }
+    var ttsEnabled by remember { mutableStateOf(prefsManager.ttsEnabled) }
+    var ttsProvider by remember { mutableStateOf(prefsManager.ttsProvider) }
+    var ttsBaseUrl by remember { mutableStateOf(prefsManager.ttsBaseUrl) }
+    var ttsApiKey by remember { mutableStateOf(prefsManager.ttsApiKey) }
+    var ttsModel by remember { mutableStateOf(prefsManager.ttsModel) }
+    var ttsVoice by remember { mutableStateOf(prefsManager.ttsVoice) }
+    var ttsReferencePath by remember { mutableStateOf(prefsManager.ttsReferencePath) }
+    var thinkingEnabled by remember { mutableStateOf(prefsManager.thinkingEnabled) }
+    var thinkingProtocol by remember { mutableStateOf(prefsManager.thinkingProtocol) }
+    var foldThinking by remember { mutableStateOf(prefsManager.foldThinking) }
+    var audioSelectionError by remember { mutableStateOf("") }
 
     var showSaveSuccess by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val referencePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            try {
+                val mime = context.contentResolver.getType(uri) ?: ""
+                val displayName = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) cursor.getString(0) else null
+                } ?: ""
+                val extension = if (mime.contains("wav") || displayName.endsWith(".wav", true)) "wav" else "mp3"
+                val target = File(context.filesDir, "tts_reference.$extension")
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: error("无法读取音频")
+                require(bytes.size <= 7_000_000) { "参考音频须小于 7 MB" }
+                target.writeBytes(bytes)
+                ttsReferencePath = target.absolutePath
+                audioSelectionError = ""
+            } catch (error: Exception) {
+                audioSelectionError = error.message ?: "音频读取失败"
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -72,10 +110,25 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
-                text = "AI 配置",
+                text = "角色",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
             )
+
+            Text("同一时间仅显示一个角色", style = MaterialTheme.typography.bodyMedium)
+            PetCatalog.characters.forEach { pet ->
+                Row(
+                    modifier = Modifier.fillMaxWidth().clickable { selectedPetId = pet.id },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(selected = selectedPetId == pet.id, onClick = { selectedPetId = pet.id })
+                    Text(pet.name)
+                }
+            }
+
+            Divider()
+
+            Text("AI 配置", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
 
             OutlinedTextField(
                 value = apiBaseUrl,
@@ -133,6 +186,67 @@ fun SettingsScreen(
                 valueRange = 100f..4000f,
                 steps = 38
             )
+
+            SettingSwitch("开启思考模式", thinkingEnabled) { thinkingEnabled = it }
+            AnimatedVisibility(thinkingEnabled) {
+                Column {
+                    Text("请求格式由模型供应商决定；不支持的模型可能拒绝该参数。", style = MaterialTheme.typography.bodySmall)
+                    listOf("reasoning_effort" to "reasoning_effort（OpenAI 兼容）", "enable_thinking" to "enable_thinking（兼容服务）").forEach { (value, label) ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { thinkingProtocol = value }) {
+                            RadioButton(selected = thinkingProtocol == value, onClick = { thinkingProtocol = value })
+                            Text(label)
+                        }
+                    }
+                }
+            }
+            SettingSwitch("默认折叠思考过程", foldThinking) { foldThinking = it }
+
+            Divider()
+            Text("语音合成", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            SettingSwitch("AI 回复后生成并播放语音", ttsEnabled) { ttsEnabled = it }
+            AnimatedVisibility(ttsEnabled) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("语音服务", style = MaterialTheme.typography.labelLarge)
+                    listOf("mimo" to "MiMo 2.5 音色复刻", "custom" to "自定义 OpenAI 兼容 TTS").forEach { (value, label) ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable {
+                            ttsProvider = value
+                            if (value == "mimo") {
+                                ttsBaseUrl = "https://api.xiaomimimo.com/v1"
+                                ttsModel = "mimo-v2.5-tts-voiceclone"
+                            } else if (ttsModel.startsWith("mimo-")) {
+                                ttsBaseUrl = "https://api.openai.com/v1"
+                                ttsModel = "tts-1"
+                                ttsVoice = "alloy"
+                            }
+                        }) {
+                            RadioButton(selected = ttsProvider == value, onClick = {
+                                ttsProvider = value
+                                if (value == "mimo") {
+                                    ttsBaseUrl = "https://api.xiaomimimo.com/v1"
+                                    ttsModel = "mimo-v2.5-tts-voiceclone"
+                                } else if (ttsModel.startsWith("mimo-")) {
+                                    ttsBaseUrl = "https://api.openai.com/v1"
+                                    ttsModel = "tts-1"
+                                    ttsVoice = "alloy"
+                                }
+                            })
+                            Text(label)
+                        }
+                    }
+                    OutlinedTextField(value = ttsBaseUrl, onValueChange = { ttsBaseUrl = it }, label = { Text("TTS API 地址") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(value = ttsApiKey, onValueChange = { ttsApiKey = it }, label = { Text("TTS API Key") }, modifier = Modifier.fillMaxWidth(), singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    OutlinedTextField(value = ttsModel, onValueChange = { ttsModel = it }, label = { Text("TTS 模型") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    if (ttsProvider == "mimo") {
+                        Text("MiMo 音色复刻需要 mp3/wav 参考音频，无需音频对应文字。", style = MaterialTheme.typography.bodySmall)
+                        OutlinedButton(onClick = { referencePicker.launch(arrayOf("audio/mpeg", "audio/wav", "audio/x-wav")) }) { Text("选择参考音频") }
+                        Text(if (ttsReferencePath.isBlank()) "尚未选择" else File(ttsReferencePath).name, style = MaterialTheme.typography.bodySmall)
+                        if (audioSelectionError.isNotBlank()) Text(audioSelectionError, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        OutlinedTextField(value = ttsVoice, onValueChange = { ttsVoice = it }, label = { Text("音色 ID") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        Text("调用 API 地址下的 /audio/speech，接收 WAV 音频。", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
 
             Divider()
 
@@ -333,6 +447,17 @@ fun SettingsScreen(
                     prefsManager.proactiveChatLevel = proactiveChatLevel
                     prefsManager.proactiveChatMinInterval = proactiveChatMinInterval
                     prefsManager.proactiveChatMaxInterval = proactiveChatMaxInterval
+                    prefsManager.selectedPetId = selectedPetId
+                    prefsManager.ttsEnabled = ttsEnabled
+                    prefsManager.ttsProvider = ttsProvider
+                    prefsManager.ttsBaseUrl = ttsBaseUrl
+                    prefsManager.ttsApiKey = ttsApiKey
+                    prefsManager.ttsModel = ttsModel
+                    prefsManager.ttsVoice = ttsVoice
+                    prefsManager.ttsReferencePath = ttsReferencePath
+                    prefsManager.thinkingEnabled = thinkingEnabled
+                    prefsManager.thinkingProtocol = thinkingProtocol
+                    prefsManager.foldThinking = foldThinking
                     showSaveSuccess = true
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -363,5 +488,13 @@ fun SettingsScreen(
                     }
             )
         }
+    }
+}
+
+@Composable
+private fun SettingSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

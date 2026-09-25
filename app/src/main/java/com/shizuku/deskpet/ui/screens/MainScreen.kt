@@ -5,6 +5,8 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.background
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -15,13 +17,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.shizuku.deskpet.data.PreferencesManager
+import com.shizuku.deskpet.data.PetCatalog
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     prefsManager: PreferencesManager,
-    onNavigateToSettings: () -> Unit,
-    onStartFloatingService: () -> Unit
+    onNavigateToSettings: () -> Unit
 ) {
     val context = LocalContext.current
     var hasOverlayPermission by remember { mutableStateOf(checkOverlayPermission(context)) }
@@ -46,31 +48,35 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        text = "掌上桌宠",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "当前角色 · ${PetCatalog.get(prefsManager.selectedPetId).name}",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "返回桌面即可看到悬浮窗",
+                        text = "返回桌面，和角色继续聊天。一次只会显示一位桌宠。",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = onNavigateToSettings) { Text("更换角色与设置") }
+                }
+            }
 
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("运行状态", style = MaterialTheme.typography.titleMedium)
+                    Text(if (hasOverlayPermission) "悬浮窗权限已开启" else "需要悬浮窗权限", color = if (hasOverlayPermission) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    Text(if (prefsManager.isConfigured()) "AI 服务已配置" else "尚未配置 AI 服务")
+                    Text(if (prefsManager.ttsEnabled) "语音播放已开启" else "语音播放已关闭")
                     if (!hasOverlayPermission) {
                         Button(
                             onClick = {
@@ -82,39 +88,17 @@ fun MainScreen(
                                     context.startActivity(intent)
                                 }
                             }
-                        ) {
-                            Text("申请悬浮窗权限")
-                        }
-                    } else {
-                        Text(
-                            text = "已授予悬浮窗权限",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        ) { Text("申请悬浮窗权限") }
                     }
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Card(
-                        modifier = Modifier.padding(horizontal = 32.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer
-                        )
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "操作说明",
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("• 单指拖拽：移动位置", style = MaterialTheme.typography.bodySmall)
-                            Text("• 双击：输入问题", style = MaterialTheme.typography.bodySmall)
-                            // Text("• 靠近边缘：自动吸附", style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("操作说明", style = MaterialTheme.typography.titleMedium)
+                    Text("拖动角色来调整位置")
+                    Text("双击角色输入消息")
+                    Text("AI 回复完成后可播放角色语音")
                 }
             }
 
@@ -122,7 +106,7 @@ fun MainScreen(
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(16.dp),
+                        .padding(top = 4.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.errorContainer
                     )
