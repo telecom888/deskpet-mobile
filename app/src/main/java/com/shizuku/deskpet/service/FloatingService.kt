@@ -19,7 +19,6 @@ class FloatingService : Service() {
         when (intent?.action) {
             ACTION_SHOW -> showFloatingWindow()
             ACTION_HIDE -> hideFloatingWindow()
-            ACTION_TOGGLE -> toggleFloatingWindow()
             ACTION_SEND_MESSAGE -> {
                 val message = intent.getStringExtra(EXTRA_MESSAGE).orEmpty()
                 if (message.isNotBlank()) {
@@ -45,14 +44,6 @@ class FloatingService : Service() {
         floatingView = null
     }
 
-    private fun toggleFloatingWindow() {
-        if (floatingView != null) {
-            hideFloatingWindow()
-        } else {
-            showFloatingWindow()
-        }
-    }
-
     override fun onDestroy() {
         hideFloatingWindow()
         super.onDestroy()
@@ -61,7 +52,6 @@ class FloatingService : Service() {
     companion object {
         const val ACTION_SHOW = "com.shizuku.deskpet.ACTION_SHOW"
         const val ACTION_HIDE = "com.shizuku.deskpet.ACTION_HIDE"
-        const val ACTION_TOGGLE = "com.shizuku.deskpet.ACTION_TOGGLE"
         const val ACTION_SEND_MESSAGE = "com.shizuku.deskpet.ACTION_SEND_MESSAGE"
         const val EXTRA_MESSAGE = "message"
     }

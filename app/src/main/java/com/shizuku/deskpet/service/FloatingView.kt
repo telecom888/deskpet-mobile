@@ -1,9 +1,7 @@
 package com.shizuku.deskpet.service
 
-import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.PixelFormat
-import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -13,9 +11,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.webkit.WebSettings
 import android.webkit.WebView
-import android.widget.Button
 import android.widget.ImageView
 import android.widget.PopupWindow
 import android.widget.ScrollView
@@ -25,7 +21,6 @@ import com.shizuku.deskpet.data.AiClient
 import com.shizuku.deskpet.data.PetCatalog
 import com.shizuku.deskpet.data.PreferencesManager
 import com.shizuku.deskpet.data.TtsClient
-import com.shizuku.deskpet.model.ChatMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -70,16 +65,11 @@ class FloatingView(
 
     private var isDragging = false
     private var currentState = PetState.IDLE
-    private var isAnimating = false
-    private var isVideoPrepared = false
     private var isWebViewInitialized = false
 
-    private val edgeThreshold = 100
     private var screenWidth = 0
 
     private val gestureDetector: GestureDetector
-
-    private var onStateChanged: ((PetState) -> Unit)? = null
 
     private var pendingVideoState: PetState? = null
     private val videoChangeHandler = Handler(Looper.getMainLooper())
@@ -419,8 +409,6 @@ class FloatingView(
         }
 
         currentState = state
-        onStateChanged?.invoke(state)
-        isVideoPrepared = true
     }
 
     fun hide() {
@@ -451,8 +439,6 @@ class FloatingView(
 
     private fun setupTouchListener() {
         val touchListener = View.OnTouchListener { _, event ->
-            if (isAnimating) return@OnTouchListener true
-
             gestureDetector.onTouchEvent(event)
 
             when (event.action) {
@@ -505,13 +491,6 @@ class FloatingView(
     private fun updateState(state: PetState) {
         currentState = state
         playVideo(state)
-        onStateChanged?.invoke(state)
-    }
-
-    fun getState(): PetState = currentState
-
-    fun setOnStateChangedListener(listener: (PetState) -> Unit) {
-        onStateChanged = listener
     }
 
     fun showAiBubble(text: String, durationMs: Int = 5000) {
@@ -748,12 +727,4 @@ class FloatingView(
         return (dp * context.resources.displayMetrics.density).toInt()
     }
 
-    private fun ValueAnimator.doOnEnd(action: () -> Unit) {
-        this.addListener(object : android.animation.Animator.AnimatorListener {
-            override fun onAnimationStart(animation: android.animation.Animator) {}
-            override fun onAnimationEnd(animation: android.animation.Animator) { action() }
-            override fun onAnimationCancel(animation: android.animation.Animator) {}
-            override fun onAnimationRepeat(animation: android.animation.Animator) {}
-        })
-    }
 }

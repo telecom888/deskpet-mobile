@@ -129,9 +129,6 @@ class MainActivity : ComponentActivity() {
         startService(intent)
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-    }
 }
 
 enum class Screen {

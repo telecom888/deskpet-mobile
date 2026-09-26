@@ -1,6 +1,5 @@
 package com.shizuku.deskpet.data
 
-import com.shizuku.deskpet.model.ChatMessage
 import com.shizuku.deskpet.model.ChatRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
