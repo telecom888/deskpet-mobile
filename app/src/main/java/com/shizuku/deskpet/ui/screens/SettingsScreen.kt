@@ -50,7 +50,8 @@ private enum class SettingsPage(val title: String) {
 @Composable
 fun SettingsScreen(
     prefsManager: PreferencesManager,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    initialPage: String? = null
 ) {
     var apiBaseUrl by rememberSaveable { mutableStateOf(prefsManager.apiBaseUrl) }
     var apiKey by rememberSaveable { mutableStateOf(prefsManager.apiKey) }
@@ -83,6 +84,8 @@ fun SettingsScreen(
     var thinkingProtocol by rememberSaveable { mutableStateOf(prefsManager.thinkingProtocol) }
     var foldThinking by rememberSaveable { mutableStateOf(prefsManager.foldThinking) }
     var audioSelectionError by rememberSaveable { mutableStateOf("") }
+    var inputDialogStyle by rememberSaveable { mutableStateOf(prefsManager.inputDialogStyle) }
+    var sendCurrentTime by rememberSaveable { mutableStateOf(prefsManager.sendCurrentTime) }
 
 
     val context = LocalContext.current
@@ -107,7 +110,7 @@ fun SettingsScreen(
             }
         }
     }
-    var currentPage by rememberSaveable { mutableStateOf(SettingsPage.Home) }
+    var currentPage by rememberSaveable { mutableStateOf(if (initialPage == "ai") SettingsPage.Ai else SettingsPage.Home) }
     var showLeaveDialog by rememberSaveable { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -145,7 +148,9 @@ fun SettingsScreen(
         ttsReferencePath != prefsManager.ttsReferencePath ||
         thinkingEnabled != prefsManager.thinkingEnabled ||
         thinkingProtocol != prefsManager.thinkingProtocol ||
-        foldThinking != prefsManager.foldThinking
+        foldThinking != prefsManager.foldThinking ||
+        inputDialogStyle != prefsManager.inputDialogStyle ||
+        sendCurrentTime != prefsManager.sendCurrentTime
     }
 
     fun saveSettings(): Boolean {
@@ -198,6 +203,8 @@ fun SettingsScreen(
         prefsManager.thinkingEnabled = thinkingEnabled
         prefsManager.thinkingProtocol = thinkingProtocol
         prefsManager.foldThinking = foldThinking
+        prefsManager.inputDialogStyle = inputDialogStyle
+        prefsManager.sendCurrentTime = sendCurrentTime
         // Preference writes are not Compose state; request a refresh after saving.
         savedRevision++
         return true
@@ -351,6 +358,20 @@ fun SettingsScreen(
                         }
                     }
                     SettingsPage.Desktop -> {
+                        SettingsSection("双击聊天窗口", "两种样式都支持角色草稿和输入法避让") {
+                            listOf(
+                                "compact" to "跟随角色 · 紧凑弹窗",
+                                "bottom_card" to "屏幕底部 · 聊天卡片"
+                            ).forEach { (value, label) ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().clickable { inputDialogStyle = value },
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(selected = inputDialogStyle == value, onClick = { inputDialogStyle = value })
+                                    Text(label, modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
                         SettingsSection("桌面显示", "悬浮窗、回复气泡与视频原声") {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -506,6 +527,10 @@ fun SettingsScreen(
                         }
                     }
                     SettingsPage.Dialogue -> {
+                        SettingsSection("对话时间") {
+                            SettingSwitch("发送当前时间给模型", sendCurrentTime) { sendCurrentTime = it }
+                            Text("开启后，每次消息和主动搭话请求附带设备当前日期、时间与时区。默认关闭；虚构时间线可保持关闭。此开关不控制界面时间显示。", style = MaterialTheme.typography.bodySmall)
+                        }
                         SettingsSection("人设与记忆") {
                             OutlinedTextField(
                                 value = systemPrompt,

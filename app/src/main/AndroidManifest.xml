@@ -29,6 +29,15 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".ui.ChatInputActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Deskpet.ChatInput"
+            android:windowSoftInputMode="adjustResize" />
+
         <service
             android:name=".service.FloatingService"
             android:exported="false"

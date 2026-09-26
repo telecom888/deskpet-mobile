@@ -20,6 +20,13 @@ class FloatingService : Service() {
             ACTION_SHOW -> showFloatingWindow()
             ACTION_HIDE -> hideFloatingWindow()
             ACTION_TOGGLE -> toggleFloatingWindow()
+            ACTION_SEND_MESSAGE -> {
+                val message = intent.getStringExtra(EXTRA_MESSAGE).orEmpty()
+                if (message.isNotBlank()) {
+                    showFloatingWindow()
+                    floatingView?.sendMessage(message)
+                }
+            }
         }
         return START_STICKY
     }
@@ -55,5 +62,7 @@ class FloatingService : Service() {
         const val ACTION_SHOW = "com.shizuku.deskpet.ACTION_SHOW"
         const val ACTION_HIDE = "com.shizuku.deskpet.ACTION_HIDE"
         const val ACTION_TOGGLE = "com.shizuku.deskpet.ACTION_TOGGLE"
+        const val ACTION_SEND_MESSAGE = "com.shizuku.deskpet.ACTION_SEND_MESSAGE"
+        const val EXTRA_MESSAGE = "message"
     }
 }

@@ -4,6 +4,21 @@ import android.content.Context
 import android.content.SharedPreferences
 
 class PreferencesManager(context: Context) {
+    val conversations = ConversationRepository(context)
+
+    var inputDialogStyle: String
+        get() = prefs.getString("input_dialog_style", "bottom_card")?.takeIf { it in setOf("compact", "bottom_card") } ?: "bottom_card"
+        set(value) = prefs.edit().putString("input_dialog_style", value).apply()
+
+    var sendCurrentTime: Boolean
+        get() = prefs.getBoolean("send_current_time", false)
+        set(value) = prefs.edit().putBoolean("send_current_time", value).apply()
+
+    fun inputDraft(petId: String): String = prefs.getString("input_draft_$petId", "") ?: ""
+
+    fun saveInputDraft(petId: String, text: String) {
+        prefs.edit().putString("input_draft_$petId", text).apply()
+    }
 
     var selectedPetId: String
         get() = prefs.getString("selected_pet_id", "perlica") ?: "perlica"

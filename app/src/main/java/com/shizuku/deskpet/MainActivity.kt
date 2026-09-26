@@ -25,6 +25,7 @@ import com.shizuku.deskpet.data.PreferencesManager
 import com.shizuku.deskpet.service.FloatingService
 import com.shizuku.deskpet.ui.screens.MainScreen
 import com.shizuku.deskpet.ui.screens.SettingsScreen
+import com.shizuku.deskpet.ui.screens.ConversationScreen
 import com.shizuku.deskpet.ui.theme.DeskpetTheme
 
 class MainActivity : ComponentActivity() {
@@ -44,7 +45,17 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    var currentScreen by rememberSaveable { mutableStateOf(Screen.Main) }
+                    var currentScreen by rememberSaveable {
+                        mutableStateOf(when {
+                            intent.getBooleanExtra("open_ai_settings", false) -> Screen.Settings
+                            intent.getBooleanExtra("open_conversations", false) -> Screen.Conversations
+                            else -> Screen.Main
+                        })
+                    }
+                    var initialSettingsPage by rememberSaveable {
+                        mutableStateOf(if (intent.getBooleanExtra("open_ai_settings", false)) "ai" else null)
+                    }
+                    var initialHistoryPetId by rememberSaveable { mutableStateOf(intent.getStringExtra("history_pet_id")) }
 
                     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -71,7 +82,7 @@ class MainActivity : ComponentActivity() {
                     AnimatedContent(
                         targetState = currentScreen,
                         transitionSpec = {
-                            val direction = if (targetState == Screen.Settings) 1 else -1
+                            val direction = if (targetState != Screen.Main) 1 else -1
                             (slideInHorizontally { it * direction } + fadeIn()) togetherWith
                                 (slideOutHorizontally { -it * direction / 3 } + fadeOut())
                         },
@@ -80,13 +91,22 @@ class MainActivity : ComponentActivity() {
                         Screen.Main -> {
                             MainScreen(
                                 prefsManager = prefsManager,
-                                onNavigateToSettings = { currentScreen = Screen.Settings }
+                                onNavigateToSettings = { initialSettingsPage = null; currentScreen = Screen.Settings },
+                                onNavigateToHistory = { initialHistoryPetId = null; currentScreen = Screen.Conversations }
                             )
                         }
                         Screen.Settings -> {
                             SettingsScreen(
                                 prefsManager = prefsManager,
-                                onBack = { currentScreen = Screen.Main }
+                                onBack = { initialSettingsPage = null; currentScreen = Screen.Main },
+                                initialPage = initialSettingsPage
+                            )
+                        }
+                        Screen.Conversations -> {
+                            ConversationScreen(
+                                prefsManager = prefsManager,
+                                initialPetId = initialHistoryPetId,
+                                onBack = { initialHistoryPetId = null; currentScreen = Screen.Main }
                             )
                         }
                     } }
@@ -116,5 +136,6 @@ class MainActivity : ComponentActivity() {
 
 enum class Screen {
     Main,
-    Settings
+    Settings,
+    Conversations
 }

@@ -13,7 +13,6 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
-import android.view.inputmethod.InputMethodManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Button
@@ -653,49 +652,28 @@ class FloatingView(
     }
 
     private fun showInputDialog() {
-        val inputView = LayoutInflater.from(context).inflate(R.layout.dialog_input, null)
-        val editText = inputView.findViewById<android.widget.EditText>(R.id.input_text)
-        val sendButton = inputView.findViewById<android.widget.Button>(R.id.btn_send)
-
-        val popupWindow = PopupWindow(
-            inputView,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            true
-        )
-
-        popupWindow.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-
-        sendButton.setOnClickListener {
-            val message = editText.text.toString()
-            if (message.isNotBlank()) {
-                sendMessage(message)
-            }
-            popupWindow.dismiss()
-        }
-
-        inputView.findViewById<android.widget.Button>(R.id.btn_cancel).setOnClickListener {
-            popupWindow.dismiss()
-        }
-
+        val petView = rootView ?: return
         val location = IntArray(2)
-        rootView?.getLocationOnScreen(location)
-
-        popupWindow.showAtLocation(
-            rootView,
-            Gravity.NO_GRAVITY,
-            location[0],
-            location[1] + (rootView?.height ?: 0)
-        )
-
-        editText.requestFocus()
-        editText.postDelayed({
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            imm?.showSoftInput(editText, InputMethodManager.SHOW_IMPLICIT)
-        }, 100)
+        petView.getLocationOnScreen(location)
+        try {
+            context.startActivity(android.content.Intent(context, com.shizuku.deskpet.ui.ChatInputActivity::class.java).apply {
+                flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra(com.shizuku.deskpet.ui.ChatInputActivity.EXTRA_PET_ID, prefsManager.selectedPetId)
+                putExtra(com.shizuku.deskpet.ui.ChatInputActivity.EXTRA_ANCHOR_X, location[0])
+                putExtra(com.shizuku.deskpet.ui.ChatInputActivity.EXTRA_ANCHOR_Y, location[1] + petView.height)
+            })
+        } catch (_: android.content.ActivityNotFoundException) {
+            showAiBubble("聊天窗口无法打开，请重新启动应用。")
+        }
     }
 
-    private fun sendMessage(message: String) {
+    fun sendMessage(message: String) {
+        val sendingPetId = prefsManager.selectedPetId
+
+        fun restoreFailedDraft() {
+            if (prefsManager.inputDraft(sendingPetId).isBlank()) prefsManager.saveInputDraft(sendingPetId, message)
+        }
+
         requestJob?.cancel()
         ttsClient?.stop()
         showLoading()
@@ -704,6 +682,7 @@ class FloatingView(
         requestJob = coroutineScope.launch {
             val client = aiClient
             if (client == null) {
+                restoreFailedDraft()
                 hideLoading()
                 initAiBubble()
                 updateAiBubbleText("请先在设置中配置API Key")
@@ -713,6 +692,7 @@ class FloatingView(
             }
 
             if (prefsManager.apiKey.isBlank()) {
+                restoreFailedDraft()
                 hideLoading()
                 initAiBubble()
                 updateAiBubbleText("请先在设置中配置API Key")
@@ -755,7 +735,9 @@ class FloatingView(
                 throw e
             } catch (e: Exception) {
                 hideLoading()
-                updateAiBubbleText("错误: ${e.message}")
+                restoreFailedDraft()
+                if (!prefsManager.showAiBubble) initAiBubble()
+                updateAiBubbleText("发送失败，消息已恢复为草稿：${e.message}")
                 finishAiBubble(5000)
                 updateState(PetState.IDLE)
             }

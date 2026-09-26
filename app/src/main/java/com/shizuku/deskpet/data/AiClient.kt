@@ -4,6 +4,16 @@ import com.shizuku.deskpet.model.ChatMessage
 import com.shizuku.deskpet.model.ChatRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
@@ -30,98 +40,89 @@ class AiClient(private val prefsManager: PreferencesManager) {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
-    private val messageHistory = mutableListOf<ChatMessage>()
-
-    fun clearHistory() {
-        messageHistory.clear()
-    }
-
     fun sendMessageStream(userMessage: String, isProactive: Boolean = false): Flow<StreamEvent> = flow {
-        val messages = mutableListOf<ChatMessage>()
-
-        if (prefsManager.systemPrompt.isNotBlank()) {
-            messages.add(ChatMessage("system", prefsManager.systemPrompt))
-        }
-
-        if (prefsManager.memoryEnabled) {
-            messages.addAll(messageHistory)
-        }
-
-        if (isProactive) {
-            val proactivePrompt = "请根据你的人设，主动找我搭话。可以是问候、分享一个有趣的冷知识、或者关心我现在的状态。要求：字数控制在20字以内，不要显得像机器回复，直接说出内容即可。"
-            messages.add(ChatMessage("system", proactivePrompt))
-        } else {
-            messages.add(ChatMessage("user", userMessage))
-        }
-
-        val requestBody = ChatRequest(
-            model = prefsManager.model,
-            messages = messages,
-            stream = true
-        )
-
-        val jsonBody = buildJsonBody(requestBody)
-
-        val request = Request.Builder()
-            .url("${prefsManager.apiBaseUrl}/chat/completions")
-            .addHeader("Authorization", "Bearer ${prefsManager.apiKey}")
-            .addHeader("Content-Type", "application/json")
-            .post(jsonBody.toRequestBody(jsonMediaType))
-            .build()
-
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string()
-                throw Exception("API请求失败: ${response.code} - $errorBody")
+        val repository = prefsManager.conversations
+        val turn = repository.beginTurn(prefsManager.selectedPetId, userMessage, isProactive)
+        var cancellationGuard: Job? = null
+        try {
+            val messages = ChatRequestMessages.build(
+                systemPrompt = prefsManager.systemPrompt,
+                history = if (prefsManager.memoryEnabled) turn.history else emptyList(),
+                userMessage = userMessage,
+                isProactive = isProactive,
+                currentTime = ChatRequestMessages.currentTime(prefsManager.sendCurrentTime)
+            )
+            val requestBody = ChatRequest(model = prefsManager.model, messages = messages, stream = true)
+            val request = Request.Builder()
+                .url("${prefsManager.apiBaseUrl}/chat/completions")
+                .addHeader("Authorization", "Bearer ${prefsManager.apiKey}")
+                .addHeader("Content-Type", "application/json")
+                .post(buildJsonBody(requestBody).toRequestBody(jsonMediaType))
+                .build()
+            val call = client.newCall(request)
+            // Closing the HTTP call on cancellation also interrupts a blocked SSE read.
+            cancellationGuard = CoroutineScope(currentCoroutineContext()).launch(
+                start = CoroutineStart.UNDISPATCHED
+            ) {
+                try { awaitCancellation() } finally { call.cancel() }
             }
-
-            val source = response.body?.source() ?: throw Exception("空响应")
-            val fullContentBuilder = StringBuilder()
-            val tagParser = ThinkTagParser()
-
-            while (!source.exhausted()) {
-                val line = source.readUtf8Line() ?: break
-
-                if (line.startsWith("data: ")) {
-                    val data = line.substring(6).trim()
-                    if (data == "[DONE]") break
-
-                    try {
-                        val json = JSONObject(data)
-                        val choices = json.optJSONArray("choices")
-                        if (choices != null && choices.length() > 0) {
-                            val delta = choices.getJSONObject(0).optJSONObject("delta")
-                            val content = delta?.optString("content", "") ?: ""
-                            val reasoning = delta?.optString("reasoning_content", "")?.takeIf { it.isNotEmpty() }
-                                ?: delta?.optString("reasoning", "") ?: ""
-
-                            if (reasoning.isNotEmpty()) emit(StreamEvent.Reasoning(reasoning))
-
-                            if (content.isNotEmpty()) {
-                                tagParser.feed(content).forEach { event ->
-                                    if (event is StreamEvent.Answer) fullContentBuilder.append(event.text)
-                                    emit(event)
-                                }
-                            }
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    throw Exception("API请求失败: ${response.code} - ${response.body?.string()}")
+                }
+                val source = response.body?.source() ?: throw Exception("空响应")
+                val answer = StringBuilder()
+                val reasoning = StringBuilder()
+                val parser = ThinkTagParser()
+                var finished = false
+                while (!source.exhausted()) {
+                    currentCoroutineContext().ensureActive()
+                    val line = source.readUtf8Line() ?: break
+                    if (!line.startsWith("data:")) continue
+                    val data = line.substring(5).trim()
+                    if (data == "[DONE]") { finished = true; break }
+                    val json = try { JSONObject(data) } catch (_: org.json.JSONException) { continue }
+                    if (json.has("error")) throw Exception("模型服务返回错误")
+                    val choices = json.optJSONArray("choices") ?: continue
+                    if (choices.length() == 0) continue
+                    val choice = choices.getJSONObject(0)
+                    if ((choice.opt("finish_reason") as? String)?.isNotBlank() == true) finished = true
+                    val delta = choice.optJSONObject("delta") ?: continue
+                    val thought = (delta.opt("reasoning_content") as? String)?.takeIf { it.isNotEmpty() }
+                        ?: (delta.opt("reasoning") as? String).orEmpty()
+                    if (thought.isNotEmpty()) {
+                        reasoning.append(thought)
+                        emit(StreamEvent.Reasoning(thought))
+                    }
+                    parser.feed((delta.opt("content") as? String).orEmpty()).forEach { event ->
+                        when (event) {
+                            is StreamEvent.Answer -> answer.append(event.text)
+                            is StreamEvent.Reasoning -> reasoning.append(event.text)
                         }
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
+                        emit(event)
                     }
                 }
-            }
-
-            tagParser.finish().forEach { event ->
-                if (event is StreamEvent.Answer) fullContentBuilder.append(event.text)
-                emit(event)
-            }
-
-            if (prefsManager.memoryEnabled) {
-                if (!isProactive) {
-                    messageHistory.add(ChatMessage("user", userMessage))
+                if (!finished) throw Exception("回复传输中断，请重新发送")
+                parser.finish().forEach { event ->
+                    when (event) {
+                        is StreamEvent.Answer -> answer.append(event.text)
+                        is StreamEvent.Reasoning -> reasoning.append(event.text)
+                    }
+                    emit(event)
                 }
-                messageHistory.add(ChatMessage("assistant", fullContentBuilder.toString()))
+                currentCoroutineContext().ensureActive()
+                repository.completeTurn(turn, answer.toString(), reasoning.toString())
             }
+        } catch (error: Exception) {
+            val cancelled = error is CancellationException || !currentCoroutineContext().isActive
+            withContext(NonCancellable) {
+                runCatching { repository.failTurn(turn, cancelled) }
+            }
+            if (error is CancellationException) throw error
+            if (cancelled) throw CancellationException("回复已停止").apply { initCause(error) }
+            throw error
+        } finally {
+            cancellationGuard?.cancel()
         }
     }.flowOn(Dispatchers.IO)
 
